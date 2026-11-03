@@ -1,0 +1,10 @@
+{
+  "window_seconds": 10,
+  "max_writes": 10,
+  "targets": {
+    "192.0.2.20": {
+      "writers": ["192.0.2.10"],
+      "registers": {"1:100": [50, 100]}
+    }
+  }
+}
