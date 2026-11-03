@@ -1,0 +1,21 @@
+services:
+  analyzer:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    command: ["--config", "/config/policy.json", "--events", "/input/requests.jsonl"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 1
+    volumes:
+      - ../examples/config.json:/config/policy.json:ro
+      - ../examples/requests.jsonl:/input/requests.jsonl:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

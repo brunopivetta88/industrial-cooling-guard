@@ -1,0 +1,22 @@
+{
+  "window_seconds": 10,
+  "max_writes": 10,
+  "targets": {
+    "127.0.0.1": {
+      "writers": ["127.0.0.1"],
+      "registers": {"1:100": [0, 65535]},
+      "temperatures": {
+        "1:100": {
+          "signed": true,
+          "scale": 0.1,
+          "offset": 0,
+          "minimum": -25,
+          "maximum": -15,
+          "initial": -20,
+          "max_step": 1,
+          "max_rise_per_minute": 0.5
+        }
+      }
+    }
+  }
+}

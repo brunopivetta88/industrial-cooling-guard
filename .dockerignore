@@ -1,0 +1,6 @@
+.git
+**/__pycache__
+*.pcap
+*.pcapng
+config.local.json
+.env

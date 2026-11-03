@@ -4,6 +4,7 @@ import math
 import struct
 import sys
 from collections import deque
+from .safety import TemperatureGuard
 
 
 def parse_request(raw):
@@ -35,23 +36,45 @@ def parse_request(raw):
 
 class Engine:
     def __init__(self, config):
+        if not isinstance(config, dict):
+            raise ValueError('configuration must be an object')
         self.config = config
         self.recent = deque()
         self.last_time = -math.inf
-        if not isinstance(config.get('targets'), dict) or not config['targets']:
+        if not isinstance(config.get('targets'), dict) or not 1 <= len(config['targets']) <= 256:
             raise ValueError('targets must be a nonempty object')
         self.window = float(config.get('window_seconds', 10))
         self.limit = config.get('max_writes', 10)
         if not math.isfinite(self.window) or self.window <= 0 or type(self.limit) is not int or not 1 <= self.limit <= 10000:
             raise ValueError('invalid rate policy')
-        for policy in config['targets'].values():
+        for target, policy in config['targets'].items():
+            if not isinstance(target, str) or not target:
+                raise ValueError('invalid target identifier')
+            if not isinstance(policy, dict):
+                raise ValueError('target policy must be an object')
             if not isinstance(policy.get('writers'), list) or not all(isinstance(s, str) for s in policy['writers']):
                 raise ValueError('writers must be a list of source identifiers')
-            for bounds in policy.get('registers', {}).values():
-                if len(bounds) != 2 or not all(type(v) is int for v in bounds) or not 0 <= bounds[0] <= bounds[1] <= 65535:
+            registers = policy.get('registers', {})
+            if not isinstance(registers, dict) or len(registers) > 4096:
+                raise ValueError('invalid register map')
+            if not isinstance(policy.get('temperatures', {}), dict):
+                raise ValueError('invalid temperature map')
+            for key, bounds in registers.items():
+                try:
+                    unit, address = (int(x) for x in key.split(':'))
+                except (ValueError, AttributeError):
+                    raise ValueError('invalid register key') from None
+                if key != f'{unit}:{address}' or not 1 <= unit <= 247 or not 0 <= address <= 65535:
+                    raise ValueError('invalid register key')
+                if not isinstance(bounds, list) or len(bounds) != 2 or not all(type(v) is int for v in bounds) or not 0 <= bounds[0] <= bounds[1] <= 65535:
                     raise ValueError('invalid register bounds')
+        self.temperatures = TemperatureGuard(config)
 
     def inspect(self, event):
+        if not isinstance(event, dict):
+            raise ValueError('event must be an object')
+        if type(event.get('timestamp')) not in (int, float):
+            raise ValueError('timestamp must be numeric')
         timestamp = float(event['timestamp'])
         if not math.isfinite(timestamp) or timestamp < self.last_time:
             raise ValueError('events require finite, chronological timestamps')
@@ -63,6 +86,8 @@ class Engine:
         if policy is None:
             return []
         try:
+            if not isinstance(event['adu_hex'], str) or len(event['adu_hex']) > 520:
+                raise ValueError('oversized ADU')
             unit, fc, address, values = parse_request(bytes.fromhex(event['adu_hex']))
         except (ValueError, TypeError):
             return ['invalid_or_unsupported_request']
@@ -71,6 +96,8 @@ class Engine:
         alerts = []
         if source not in policy['writers']:
             alerts.append('unauthorized_writer')
+        if unit == 0 or unit > 247:
+            alerts.append('invalid_write_unit')
         while self.recent and self.recent[0][0] <= timestamp - self.window:
             self.recent.popleft()
         # Global bounded history: conservative aggregate write burst per sensor.
@@ -85,6 +112,7 @@ class Engine:
                 alerts.append('unmapped_register')
             elif not bounds[0] <= value <= bounds[1]:
                 alerts.append('register_out_of_range')
+        alerts.extend(self.temperatures.inspect(target, unit, address, values, timestamp, commit=not alerts))
         return sorted(set(alerts))
 
 
@@ -100,9 +128,16 @@ def main():
         parser.error(str(exc))
     handle = sys.stdin if args.events == '-' else open(args.events)
     try:
-        for number, line in enumerate(handle, 1):
+        number = 0
+        while True:
+            line = handle.readline(8193)
+            if not line:
+                break
+            number += 1
             if len(line) > 8192:
                 print(json.dumps({'line': number, 'alerts': ['input_too_large']}), flush=True)
+                while line and not line.endswith('\n'):
+                    line = handle.readline(8193)
                 continue
             try:
                 event = json.loads(line)

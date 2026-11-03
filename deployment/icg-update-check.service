@@ -1,0 +1,22 @@
+[Unit]
+Description=Industrial Cooling Guard release metadata check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=icg
+WorkingDirectory=/opt/industrial-cooling-guard
+EnvironmentFile=/etc/icg/update-check.env
+ExecStart=/usr/bin/python3 -m icg.update_check --current ${ICG_APPROVED_TAG}
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=128M
+TimeoutStartSec=30
+
+# Template only: provide an unprivileged account and approved installation paths.
